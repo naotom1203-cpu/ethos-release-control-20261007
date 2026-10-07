@@ -20,8 +20,8 @@ def build(source,output):
     with tempfile.TemporaryDirectory(prefix='protected-build-') as tmp:
         work=Path(tmp)/'work';shutil.copytree(source,work)
         # This directory is disposable and contains only the reviewed source.
-        run(['docker','run','--rm','--network','none','--cap-drop','ALL','--cap-add','CHOWN','--cap-add','FOWNER','--security-opt','no-new-privileges','--mount','type=bind,src='+str(work)+',dst=/work',IMAGE,'chown','-R','1000:1000','/work'])
         try:
+            run(['docker','run','--rm','--network','none','--cap-drop','ALL','--cap-add','CHOWN','--cap-add','FOWNER','--security-opt','no-new-privileges','--mount','type=bind,src='+str(work)+',dst=/work',IMAGE,'chown','-R','1000:1000','/work'])
             base=['docker','run','--rm','--user','1000:1000','--cap-drop','ALL','--security-opt','no-new-privileges','--read-only','--pids-limit','256','--memory','6g','--cpus','2','--tmpfs','/tmp:rw,nosuid,size=1g,uid=1000,gid=1000','--mount','type=bind,src='+str(work)+',dst=/work','--workdir','/work','--env','HOME=/tmp','--env','CI=true']
             run(base+['--network','bridge',IMAGE,'npm','ci','--ignore-scripts','--no-audit','--no-fund','--registry=https://registry.npmjs.org'])
             original_lock_hash=hashlib.sha256((work/'package-lock.json').read_bytes()).hexdigest()
@@ -50,8 +50,13 @@ def build(source,output):
             if artifact_manifest(output)!=manifest:raise ValueError('copied_artifact_mismatch')
             return {'artifactManifest':manifest,'typecheckPassed':True,'buildPassed':True,'sourceBuildSandbox':'no-network-no-credentials-non-root','image':IMAGE,'registryAuditVulnerabilities':vulnerability_counts,'allReviewedPrebuildChecksExecuted':True,'auditedLockfileSha256':original_lock_hash,'registryAuditResponseSha256':hashlib.sha256(audit.stdout).hexdigest()}
         finally:
-            # Restore ownership only in this controller-created disposable mount.
-            run(['docker','run','--rm','--network','none','--cap-drop','ALL','--cap-add','CHOWN','--cap-add','FOWNER','--security-opt','no-new-privileges','--mount','type=bind,src='+str(work)+',dst=/work',IMAGE,'chown','-R',str(os.getuid())+':'+str(os.getgid()),'/work'])
+            primary = sys.exc_info()[1]
+            try:
+                run(['docker','run','--rm','--network','none','--cap-drop','ALL','--cap-add','CHOWN','--cap-add','FOWNER','--security-opt','no-new-privileges','--mount','type=bind,src='+str(work)+',dst=/work',IMAGE,'chown','-R',str(os.getuid())+':'+str(os.getgid()),'/work'])
+            except Exception as cleanup_error:
+                if primary is not None:
+                    raise ExceptionGroup('Build and disposable cleanup failed', [primary, cleanup_error]) from None
+                raise
 
 
 if __name__=='__main__':
