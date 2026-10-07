@@ -1,8 +1,24 @@
 """Root-prepared generic build sandbox; requires an isolated Linux CI runner."""
 import hashlib,json,os,shutil,subprocess,sys,tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from controller_contract import artifact_manifest
 IMAGE='node@sha256:c4d5523090a817b7aa86d2111241fdd4f66d1e27782b44160e6aa63b357ecb2d'
+
+@contextmanager
+def disposable_directory():
+    # Only a freshly controller-created directory is removed.
+    tmp = Path(tempfile.mkdtemp(prefix='protected-build-'))
+    try:
+        yield str(tmp)
+    except BaseException as primary:
+        try:
+            shutil.rmtree(tmp)
+        except BaseException as cleanup:
+            raise BaseExceptionGroup('Build and temporary directory cleanup failed', [primary, cleanup]) from None
+        raise
+    else:
+        shutil.rmtree(tmp)
 
 def run(args, capture=False):
     return subprocess.run(args,check=True,timeout=1200,capture_output=capture,env={'PATH':os.environ['PATH'],'HOME':os.environ.get('HOME','/tmp')})
@@ -17,7 +33,7 @@ def build(source,output):
     expected_prebuild='node scripts/verify-mandatory-security-build-gates.mjs && node scripts/normalize-vinext-font-cache.mjs && node scripts/verify-migration-versions.mjs && node scripts/write-release-manifest.mjs'
     if scripts.get('prebuild')!=expected_prebuild or scripts.get('build')!='WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build':
         raise ValueError('reviewed_build_lifecycle_changed')
-    with tempfile.TemporaryDirectory(prefix='protected-build-') as tmp:
+    with disposable_directory() as tmp:
         work=Path(tmp)/'work';shutil.copytree(source,work)
         # This directory is disposable and contains only the reviewed source.
         try:
