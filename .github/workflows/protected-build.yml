@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: naotom1203-cpu/ethos-release-control-20261007
-          ref: 73fd99f18f810e530285d3b218ebd4bca7cafca5
+          ref: b2cd5584e9ea6bf15988dea6205f864fae7d6ec3
           path: controller
           persist-credentials: false
       - name: Checkout private fixed product snapshot
@@ -65,7 +65,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: naotom1203-cpu/ethos-release-control-20261007
-          ref: 73fd99f18f810e530285d3b218ebd4bca7cafca5
+          ref: b2cd5584e9ea6bf15988dea6205f864fae7d6ec3
           path: controller
           persist-credentials: false
       - name: Read private build output without executing product code
@@ -80,11 +80,17 @@ jobs:
           chmod 755 "$RUNNER_TEMP/cosign"
       - name: Assemble exact source and artifact receipt
         env:
+          SOURCE_CONTRACT: ${{ inputs.native_source_contract }}
           CONTROLLER_OWNER: naotom1203-cpu
           CONTROLLER_REPOSITORY: ethos-release-control-20261007
         run: |
+          python3 - <<'PYCODE'
+          import json,os
+          from pathlib import Path
+          Path('caller-native-source.json').write_text(json.dumps(json.loads(os.environ['SOURCE_CONTRACT'])))
+          PYCODE
           python3 controller/read_signer_identity.py > signer-identity.json
-          python3 controller/create_receipt_from_identity.py evidence/native-source.json evidence/build-result.json evidence/product-output signer-identity.json signed-receipt.json
+          python3 controller/create_receipt_from_identity.py evidence/native-source.json evidence/build-result.json evidence/product-output signer-identity.json signed-receipt.json caller-native-source.json evidence/source-validation.json
       - name: Sign receipt only with exact workflow identity
         run: '"$RUNNER_TEMP/cosign" sign-blob signed-receipt.json --bundle signed-receipt.sigstore.json --yes'
       - name: Retain private receipt and bundle
