@@ -34,6 +34,7 @@ def build(source,output):
         shim=trusted/'bin'/'npm'
         shim.write_text('#!/bin/sh\nif [ "$#" -eq 2 ] && [ "$1" = audit ] && [ "$2" = --json ]; then cat /trusted/audit.json; exit 0; fi\nif [ "$1" = audit ]; then echo "Unreviewed audit invocation" >&2; exit 1; fi\nexec /usr/local/bin/npm "$@"\n')
         shim.chmod(0o755)
+        (trusted/'npm-gate-cli.mjs').write_text("import fs from 'node:fs';import {spawnSync} from 'node:child_process';const args=process.argv.slice(2);if(JSON.stringify(args)===JSON.stringify(['audit','--audit-level=high'])){const v=JSON.parse(fs.readFileSync('/trusted/audit.json','utf8')).metadata?.vulnerabilities;if(!v||['info','low','moderate','high','critical','total'].some(k=>v[k]!==0))process.exit(1);console.log(JSON.stringify({freshRegistryAuditSnapshotValidated:true,vulnerabilities:v}));}else if(JSON.stringify(args)===JSON.stringify(['run','verify:security'])){const r=spawnSync(process.execPath,['/usr/local/lib/node_modules/npm/bin/npm-cli.js',...args],{stdio:'inherit',env:process.env});if(r.error||r.signal)process.exit(1);process.exit(r.status??1);}else{process.exit(1);}")
         offline=base+['--mount','type=bind,src='+str(trusted)+',dst=/trusted,readonly','--env','PATH=/trusted/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin']
         # The baseline's exact npm audit --json call consumes this immutable
         # fresh registry response; all other npm calls use the official CLI.
@@ -41,7 +42,7 @@ def build(source,output):
         # Its security source gate and every other reviewed prebuild step run below;
         # the audit is performed above with scripts disabled and no credentials.
         # Product code receives no network, secrets, OIDC token, host socket or controller mount.
-        run(offline+['--network','none',IMAGE,'sh','-eu','-c','npm run typecheck && npm run verify:security && node scripts/normalize-vinext-font-cache.mjs && node scripts/verify-migration-versions.mjs && node scripts/write-release-manifest.mjs && npm run build --ignore-scripts && npm run verify:release:manifest'])
+        run(offline+['--network','none',IMAGE,'sh','-eu','-c','npm run typecheck && npm_execpath=/trusted/npm-gate-cli.mjs node scripts/verify-mandatory-security-build-gates.mjs && node scripts/normalize-vinext-font-cache.mjs && node scripts/verify-migration-versions.mjs && node scripts/write-release-manifest.mjs && npm run build --ignore-scripts && npm run verify:release:manifest'])
         if hashlib.sha256((work/'package-lock.json').read_bytes()).hexdigest()!=original_lock_hash:raise ValueError('lockfile_changed_after_registry_audit')
         built=work/'dist';manifest=artifact_manifest(built)
         shutil.copytree(built,output)
