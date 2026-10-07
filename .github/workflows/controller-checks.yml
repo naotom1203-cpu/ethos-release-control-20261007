@@ -1,0 +1,18 @@
+name: Controller boundary checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  controller-boundaries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s . -p 'test_*.py'
+      - run: python3 -m py_compile controller_contract.py prepare_native_source.py sandbox_build.py assemble_build_receipt.py read_signer_identity.py create_receipt_from_identity.py
