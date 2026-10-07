@@ -1,0 +1,98 @@
+name: Protected private product build
+on:
+  workflow_call:
+    inputs:
+      product_snapshot:
+        required: true
+        type: string
+      native_source_contract:
+        required: true
+        type: string
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout immutable trusted controller helpers
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: naotom1203-cpu/ethos-release-control-20261007
+          ref: 73fd99f18f810e530285d3b218ebd4bca7cafca5
+          path: controller
+          persist-credentials: false
+      - name: Checkout private fixed product snapshot
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.product_snapshot }}
+          path: product
+          persist-credentials: false
+      - name: Validate source contract and restore native identity
+        env:
+          SOURCE_CONTRACT: ${{ inputs.native_source_contract }}
+        run: |
+          python3 - <<'PYCODE'
+          import json,os
+          from pathlib import Path
+          document=json.loads(os.environ['SOURCE_CONTRACT'])
+          Path('native-source.json').write_text(json.dumps(document))
+          PYCODE
+          python3 controller/prepare_native_source.py product native-source.json > source-validation.json
+      - name: Build without product credentials or network
+        run: python3 controller/sandbox_build.py product product-output build-result.json
+      - name: Preserve private build evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-private-product
+          path: |
+            product-output/
+            build-result.json
+            native-source.json
+            source-validation.json
+          retention-days: 7
+          if-no-files-found: error
+  sign:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout immutable trusted receipt verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: naotom1203-cpu/ethos-release-control-20261007
+          ref: 73fd99f18f810e530285d3b218ebd4bca7cafca5
+          path: controller
+          persist-credentials: false
+      - name: Read private build output without executing product code
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: unsigned-private-product
+          path: evidence
+      - name: Install verified immutable signing binary
+        run: |
+          curl --fail --location --proto '=https' --tlsv1.2 https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64 -o "$RUNNER_TEMP/cosign"
+          printf '%s  %s\n' '4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71' "$RUNNER_TEMP/cosign" | sha256sum --check
+          chmod 755 "$RUNNER_TEMP/cosign"
+      - name: Assemble exact source and artifact receipt
+        env:
+          CONTROLLER_OWNER: naotom1203-cpu
+          CONTROLLER_REPOSITORY: ethos-release-control-20261007
+        run: |
+          python3 controller/read_signer_identity.py > signer-identity.json
+          python3 controller/create_receipt_from_identity.py evidence/native-source.json evidence/build-result.json evidence/product-output signer-identity.json signed-receipt.json
+      - name: Sign receipt only with exact workflow identity
+        run: '"$RUNNER_TEMP/cosign" sign-blob signed-receipt.json --bundle signed-receipt.sigstore.json --yes'
+      - name: Retain private receipt and bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: signed-private-product-receipt
+          path: |
+            signed-receipt.json
+            signed-receipt.sigstore.json
+          retention-days: 7
+          if-no-files-found: error
