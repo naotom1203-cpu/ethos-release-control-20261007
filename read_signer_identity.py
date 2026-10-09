@@ -6,7 +6,7 @@ def validate_claims(claims):
     prefix='naotom1203-cpu/ethos-release-control-20261007/.github/workflows/protected-build.yml@'
     ref=claims.get('job_workflow_ref','');sha=claims.get('job_workflow_sha','')
     if claims.get('iss')!='https://token.actions.githubusercontent.com' or claims.get('aud')!='sigstore':raise ValueError('issuer_audience_mismatch')
-    if claims.get('repository')!='naotom1203-cpu/ethos-recovery':raise ValueError('private_caller_repository_mismatch')
+    if claims.get('repository')!='ethos-security-recovery/ethos-recovery':raise ValueError('private_caller_repository_mismatch')
     if ref!=prefix+sha or not re.fullmatch('[a-f0-9]{40}',sha):raise ValueError('immutable_signer_workflow_required')
     return {'owner':'naotom1203-cpu','repository':'ethos-release-control-20261007','workflowSha':sha,'identity':signing_identity('naotom1203-cpu','ethos-release-control-20261007',sha),'issuer':claims['iss'],'callerRepository':claims['repository']}
 
