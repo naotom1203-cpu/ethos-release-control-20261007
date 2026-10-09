@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: naotom1203-cpu/ethos-release-control-20261007
-          ref: 955a3a8f9a3d77bc18347b036b31e7917fce8100
+          ref: 660c0d3cd4197c627f04f446577cd33e02fa19da
           path: controller
           persist-credentials: false
       - name: Checkout private fixed product snapshot
@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: naotom1203-cpu/ethos-release-control-20261007
-          ref: 955a3a8f9a3d77bc18347b036b31e7917fce8100
+          ref: 660c0d3cd4197c627f04f446577cd33e02fa19da
           path: controller
           persist-credentials: false
       - name: Read private build output without executing product code
