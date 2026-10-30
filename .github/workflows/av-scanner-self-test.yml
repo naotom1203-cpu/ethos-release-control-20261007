@@ -1,0 +1,61 @@
+name: Antivirus synthetic feasibility proof
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/av-scanner-self-test.yml
+permissions: {}
+concurrency:
+  group: antivirus-synthetic-proof
+  cancel-in-progress: false
+jobs:
+  synthetic-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Install official Ubuntu scanner packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq clamav
+          sudo systemctl stop clamav-freshclam.service || true
+          sudo timeout 300s freshclam --stdout
+      - name: Verify clean, malicious-test, archive, limit and engine-error outcomes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, pathlib, resource, shutil, subprocess, tempfile, time, zipfile
+          # Public inert EICAR fixture only. No checkout, customer data, secrets,
+          # API credentials, uploaded artifact or inbound scan listener exists.
+          start = time.monotonic()
+          root = pathlib.Path(tempfile.mkdtemp(prefix='ethos-av-public-fixtures-'))
+          os.chmod(root, 0o755)
+          def bounds():
+              resource.setrlimit(resource.RLIMIT_CPU, (45, 45))
+              resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))
+              resource.setrlimit(resource.RLIMIT_FSIZE, (1024**2, 1024**2))
+          try:
+              (root/'clean.png').write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jr9sAAAAASUVORK5CYII='))
+              eicar = base64.b64decode('WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo=')
+              assert len(eicar) == 68
+              (root/'renamed.png').write_bytes(eicar)
+              with zipfile.ZipFile(root/'archive.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+                  z.writestr('inert-test.txt', eicar)
+              (root/'oversize.bin').write_bytes(b'\0' * (6 * 1024**2))
+              (root/'empty-db').mkdir(mode=0o755)
+              args = ['sudo','unshare','--net','--','setpriv','--reuid=nobody','--regid=nogroup','--clear-groups','--no-new-privs','env','-i','PATH=/usr/bin:/bin','/usr/bin/clamscan','--no-summary','--official-db-only=yes','--disable-cache','--max-filesize=5M','--max-scansize=12M','--max-files=8','--max-recursion=3','--alert-exceeds-max=yes','--alert-encrypted=yes']
+              results = {}
+              for name, expected in [('clean.png',0),('renamed.png',1),('archive.zip',1),('oversize.bin',1)]:
+                  r = subprocess.run(args + ['--', str(root/name)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, preexec_fn=bounds)
+                  results[name] = {'exit':r.returncode, 'expected':expected, 'passed':r.returncode==expected}
+              r = subprocess.run(args + ['--database='+str(root/'empty-db'),'--',str(root/'clean.png')],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=60,preexec_fn=bounds)
+              results['missing-signatures'] = {'exit':r.returncode,'expected':2,'passed':r.returncode==2}
+              version = subprocess.check_output(['/usr/bin/clamscan','--version'],text=True).strip()
+              result = {'schema':'ethos.synthetic-antivirus-proof.v1','passed':all(x['passed'] for x in results.values()),'engine':version,'cases':results,'elapsedSeconds':round(time.monotonic()-start,2),'networkNamespaceDuringScan':True,'scannerUser':'nobody','noNewPrivileges':True,'customerDataTransferred':False,'productionIntegrated':False}
+              print(json.dumps(result,sort_keys=True))
+              assert result['passed'], 'Synthetic antivirus feasibility proof failed'
+          finally:
+              shutil.rmtree(root)
+          PY
