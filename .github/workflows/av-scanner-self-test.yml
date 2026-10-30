@@ -46,10 +46,12 @@ jobs:
               (root/'oversize.bin').write_bytes(b'\0' * (6 * 1024**2))
               (root/'empty-db').mkdir(mode=0o755)
               args = ['sudo','unshare','--net','--','setpriv','--reuid=nobody','--regid=nogroup','--clear-groups','--no-new-privs','env','-i','PATH=/usr/bin:/bin','/usr/bin/clamscan','--no-summary','--official-db-only=yes','--disable-cache','--max-filesize=5M','--max-scansize=12M','--max-files=8','--max-recursion=3','--alert-exceeds-max=yes','--alert-encrypted=yes']
+              # Oversize must be refused: infected/limit (1) or scan error (2).
+              # An error is never a clean verdict or evidence of malware detection.
               results = {}
-              for name, expected in [('clean.png',0),('renamed.png',1),('archive.zip',1),('oversize.bin',1)]:
+              for name, expected in [('clean.png',[0]),('renamed.png',[1]),('archive.zip',[1]),('oversize.bin',[1,2])]:
                   r = subprocess.run(args + ['--', str(root/name)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, preexec_fn=bounds)
-                  results[name] = {'exit':r.returncode, 'expected':expected, 'passed':r.returncode==expected}
+                  results[name] = {'exit':r.returncode, 'expected':expected, 'passed':r.returncode in expected}
               r = subprocess.run(args + ['--database='+str(root/'empty-db'),'--',str(root/'clean.png')],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=60,preexec_fn=bounds)
               results['missing-signatures'] = {'exit':r.returncode,'expected':2,'passed':r.returncode==2}
               version = subprocess.check_output(['/usr/bin/clamscan','--version'],text=True).strip()
